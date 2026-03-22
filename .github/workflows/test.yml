@@ -79,8 +79,11 @@ jobs:
             target/
           key: ${{ runner.os }}-cargo-test-${{ hashFiles('Cargo.lock') }}
 
+      - name: Add wasm32-unknown-unknown target
+        run: rustup target add wasm32-unknown-unknown
+
       - name: Run unit tests
-        run: cargo test --lib 
+        run: cargo test --lib
 
       - name: Clippy
         run: cargo clippy --target wasm32-unknown-unknown -- -D warnings
