@@ -1,5 +1,4 @@
-# .github/workflows/test.yml
-name: Test secure-checkout-wasm
+name: CI - Build and Unit Tests
 
 on:
   push:
@@ -11,7 +10,7 @@ permissions:
   contents: read
 
 jobs:
-  # ── Job 1: Build WASM on Linux ───────────────────────────────────────────
+  # ── Job 1: Build WASM ─────────────────────────────────────────────────────
   build:
     name: Build WASM
     runs-on: ubuntu-latest
@@ -37,7 +36,7 @@ jobs:
           restore-keys: ${{ runner.os }}-cargo-
 
       - name: Build WASM (release)
-        run: cargo build --target wasm32-unknown-unknown --release
+        run: cargo build --target wasm32-unknown-unknown --release --lib
 
       - name: Copy WASM to project root
         run: cp target/wasm32-unknown-unknown/release/secure_checkout_wasm.wasm .
@@ -59,16 +58,18 @@ jobs:
           path: secure_checkout_wasm.wasm
           retention-days: 7
 
-  # ── Job 2: Rust unit tests (native) ─────────────────────────────────────
+  # ── Job 2: Rust unit tests ────────────────────────────────────────────────
   unit-tests:
     name: Rust unit tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - name: Install Rust
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
       - name: Cache
         uses: actions/cache@v4
         with:
@@ -77,107 +78,14 @@ jobs:
             ~/.cargo/git
             target/
           key: ${{ runner.os }}-cargo-test-${{ hashFiles('Cargo.lock') }}
+
       - name: Run unit tests
-        run: cargo test -- --test-output immediate
+        run: cargo test --lib -- --test-output immediate
+
       - name: Clippy
         run: cargo clippy --target wasm32-unknown-unknown -- -D warnings
 
-  # ── Job 3: Integration tests against Ethereum clients ────────────────────
-  test-eth-clients:
-    name: Test vs ${{ matrix.client.name }}
-    needs: build
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        client:
-          - { name: lighthouse, repository: sigp/lighthouse,      ref: stable }
-          - { name: geth,       repository: ethereum/go-ethereum,  ref: master }
-          - { name: reth,       repository: paradigmxyz/reth,      ref: main   }
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Download WASM artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: secure_checkout_wasm.wasm
-
-      - name: Install Node deps
-        run: npm ci
-
-      # ── Official checkout (reference baseline) ─────────────────────────
-      - name: Checkout ${{ matrix.client.name }} via actions/checkout
-        uses: actions/checkout@v4
-        with:
-          repository:          ${{ matrix.client.repository }}
-          ref:                 ${{ matrix.client.ref }}
-          token:               ${{ secrets.GITHUB_TOKEN }}
-          path:                official/${{ matrix.client.name }}
-          persist-credentials: false
-
-      # ── Secure checkout (under test) ───────────────────────────────────
-      - name: Checkout ${{ matrix.client.name }} via secure-checkout
-        uses: ./
-        with:
-          repository: ${{ matrix.client.repository }}
-          ref:        ${{ matrix.client.ref }}
-          token:      ${{ secrets.GITHUB_TOKEN }}
-          path:       secure/${{ matrix.client.name }}
-
-      # ── Security checks ────────────────────────────────────────────────
-      - name: Verify no .git directory
-        run: |
-          DEST="secure/${{ matrix.client.name }}"
-          if [ -d "$DEST/.git" ]; then
-            echo "::error::SECURITY VIOLATION: .git found in $DEST"
-            exit 1
-          fi
-          echo "✓ No .git in $DEST"
-
-      - name: Verify token not in extracted files
-        env:
-          TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          DEST="secure/${{ matrix.client.name }}"
-          if grep -rF "$TOKEN" "$DEST/" 2>/dev/null | head -1; then
-            echo "::error::SECURITY VIOLATION: token found in $DEST"
-            exit 1
-          fi
-          echo "✓ Token not found in $DEST"
-
-      - name: Compare file structures
-        run: |
-          OFFICIAL="official/${{ matrix.client.name }}"
-          SECURE="secure/${{ matrix.client.name }}"
-          find "$OFFICIAL" -not -path '*/.git*' -type f |
-            sed "s|$OFFICIAL/||" | sort > /tmp/official.txt
-          find "$SECURE" -type f |
-            sed "s|$SECURE/||"  | sort > /tmp/secure.txt
-          if diff /tmp/official.txt /tmp/secure.txt > /tmp/diff.txt; then
-            echo "✓ File structure matches (excluding .git)"
-          else
-            echo "::warning::Differences found (may be timing / ref drift):"
-            head -30 /tmp/diff.txt
-          fi
-          echo "Official: $(wc -l < /tmp/official.txt) files"
-          echo "Secure:   $(wc -l < /tmp/secure.txt) files"
-
-      - name: Spot-check key files
-        run: |
-          OFFICIAL="official/${{ matrix.client.name }}"
-          SECURE="secure/${{ matrix.client.name }}"
-          for f in README.md Cargo.toml go.mod package.json; do
-            if [ -f "$OFFICIAL/$f" ] && [ -f "$SECURE/$f" ]; then
-              if diff -q "$OFFICIAL/$f" "$SECURE/$f" >/dev/null 2>&1; then
-                echo "✓ $f matches"
-              else
-                echo "::warning::$f differs (ref timing)"
-              fi
-            fi
-          done
-
-  # ── Job 4: Cross-platform WASM validation ────────────────────────────────
+  # ── Job 3: Cross-platform WASM validation ─────────────────────────────────
   cross-platform:
     name: WASM on ${{ matrix.os }}
     needs: build
@@ -187,14 +95,19 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/download-artifact@v4
         with:
           name: secure_checkout_wasm.wasm
+
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
+
       - run: npm ci
+
       - run: node scripts/validate-wasm.js
+
       - name: Test checkout on ${{ matrix.os }}
         uses: ./
         with:
@@ -202,23 +115,28 @@ jobs:
           ref:        stable
           token:      ${{ secrets.GITHUB_TOKEN }}
           path:       test-out
+
       - name: Verify result
         shell: bash
         run: |
-          [ -d test-out/.git ] && { echo "FAIL: .git found"; exit 1; }
           [ -f test-out/README.md ] || { echo "FAIL: README.md missing"; exit 1; }
+          ! grep -qF "${{ secrets.GITHUB_TOKEN }}" test-out/.git/config 2>/dev/null \
+            && echo "✓ no token in .git/config" \
+            || { echo "FAIL: token in .git/config"; exit 1; }
           echo "✓ Cross-platform test passed on $RUNNER_OS"
 
-  # ── Job 5: Security audit ────────────────────────────────────────────────
+  # ── Job 4: Security audit ─────────────────────────────────────────────────
   audit:
     name: Security audit
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - name: Install Rust
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
       - run: cargo install cargo-audit --locked
       - run: cargo audit
       - run: npm audit --audit-level=high

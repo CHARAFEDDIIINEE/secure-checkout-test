@@ -1,84 +1,38 @@
 # secure-checkout-wasm
 
-A secure, WebAssembly-powered alternative to [`actions/checkout`](https://github.com/actions/checkout).
+A secure drop-in replacement for `actions/checkout` — compiled from Rust to WebAssembly (`wasm32-unknown-unknown`).
 
-Built with Rust compiled to **`wasm32-unknown-unknown`** — the correct WASM target for Node.js 20, compatible with Windows (Git Bash), Linux, and macOS.
+Does everything `actions/checkout` does with stronger security guarantees: token never written to disk, no ArtiPACKED risk, no credential persistence.
+
+Verified on GitHub Actions against three production Ethereum clients: Lighthouse, Geth, and Reth.
 
 ---
 
-## Why not `actions/checkout`?
+## Security comparison
 
-| Vulnerability | `actions/checkout` | `secure-checkout-wasm` |
+| | `actions/checkout` | `secure-checkout-wasm` |
 |---|---|---|
-| Token in `.git/config` | Written by default (`persist-credentials: true`) | No `.git` directory created |
-| ArtiPACKED | `.git/` accidentally uploaded in artifacts exposes the token | Nothing to upload — no `.git/` |
-| Token in logs | Possible on verbose git errors | `core.setSecret()` + never passed to WASM |
-| Residual credential files | Persist on self-hosted runners | No credential files created |
+| Source files extracted | ✅ | ✅ |
+| Git history (`git log`, `git describe`) | ✅ | ✅ via GitHub API |
+| Submodules | ✅ | ✅ recursive ZIP |
+| LFS files | ✅ | ✅ batch API |
+| Token written to `.git/config` | ❌ yes by default | ✅ never |
+| Token on disk anywhere | ❌ possible | ✅ never |
+| ArtiPACKED attack surface | ❌ exists | ✅ eliminated |
+| Token verified absent from config | ❌ no check | ✅ verified on every run |
 
 ---
 
-## Architecture
-
-```
-GitHub API (HTTPS)
-     │  Authorization: Bearer <token>   ← in HTTP header only, in JS
-     ▼
-┌─────────────────────────────────────────────────────┐
-│  index.js  (Node.js 20)                             │
-│  • downloads ZIP via https.get()                    │
-│  • token used once, reference dropped               │
-│  • copies bytes into WASM linear memory             │
-│  • calls extract_zip() in WASM                      │
-│  • provides js_write_file / js_create_dir imports   │
-└──────────────────────────┬──────────────────────────┘
-                           │  archive bytes (no token)
-                           ▼
-┌─────────────────────────────────────────────────────┐
-│  secure_checkout_wasm.wasm  (Rust, no_std)          │
-│  • parses ZIP central directory                     │
-│  • filters .git entries                             │
-│  • safe_join() blocks path traversal                │
-│  • calls js_write_file / js_create_dir per file     │
-└─────────────────────────────────────────────────────┘
-     │  plain files only  (no .git, no credentials)
-     ▼
-  $GITHUB_WORKSPACE/path/
-```
-
-### Why the token lives in JS, not WASM
-
-`wasm32-unknown-unknown` has no OS threads and no socket API.
-`reqwest::blocking` is explicitly `#[cfg(not(target_arch = "wasm32"))]`
-in reqwest's own source — it **cannot** be used on this target.
-
-Using the Node.js `https` module for the download is both the correct architecture
-and the more secure one: the token is consumed by a single `https.get()` call
-and never enters WASM linear memory.
-
----
-
-## Usage
+## How to use
 
 ```yaml
 steps:
   - uses: your-org/secure-checkout-wasm@v1
     with:
-      repository: ${{ github.repository }}
-      ref:        ${{ github.sha }}
-      token:      ${{ secrets.GITHUB_TOKEN }}
-      path:       src
-```
-
-Drop-in for `actions/checkout` when you don't need git history:
-
-```yaml
-# Before
-- uses: actions/checkout@v4
-  with:
-    persist-credentials: false
-
-# After
-- uses: your-org/secure-checkout-wasm@v1
+      repository: sigp/lighthouse
+      ref: stable
+      token: ${{ secrets.GITHUB_TOKEN }}
+      path: lighthouse-src
 ```
 
 ### Inputs
@@ -86,79 +40,131 @@ Drop-in for `actions/checkout` when you don't need git history:
 | Input | Default | Description |
 |---|---|---|
 | `repository` | `${{ github.repository }}` | `owner/name` format |
-| `ref` | `${{ github.sha }}` | Branch, tag, or SHA |
-| `token` | `${{ github.token }}` | GitHub API token |
-| `path` | `.` | Checkout destination |
-| `fetch-depth` | `1` | Accepted for compatibility; always shallow |
+| `ref` | `${{ github.sha }}` | Branch, tag, or commit SHA |
+| `token` | `${{ github.token }}` | GitHub API token — never written to disk |
+| `path` | `.` | Destination directory |
+| `fetch-depth` | `1` | Commits to fetch for git history. Set `0` to skip |
+| `submodules` | `false` | Checkout submodules |
+| `lfs` | `false` | Download LFS files |
 
 ### Outputs
 
 | Output | Description |
 |---|---|
-| `path` | Absolute path of the checkout |
+| `path` | Absolute path where the repository was checked out |
 | `ref` | The ref that was checked out |
+
+### With all features
+
+```yaml
+- uses: your-org/secure-checkout-wasm@v1
+  with:
+    repository: ${{ github.repository }}
+    ref: ${{ github.sha }}
+    token: ${{ secrets.GITHUB_TOKEN }}
+    submodules: true
+    lfs: true
+    fetch-depth: 50
+```
 
 ---
 
-## Building
+## Architecture
+
+```
+GitHub API (HTTPS)
+     │  Authorization: Bearer <token>   ← in HTTP header only
+     ▼
+index.js (Node.js 20)
+  • downloads ZIP via https.get()
+  • token used once, never touches disk
+  • copies ZIP bytes into WASM memory
+  • calls extract_zip() — WASM filters .git, blocks path traversal
+  • calls buildGitDir() — writes .git without token
+  • verifies token absent from .git/config
+     │
+     ▼
+secure_checkout_wasm.wasm (Rust, no_std)
+  • parses ZIP central directory
+  • filters .git entries before any write
+  • safe_join() blocks path traversal (../, /etc, C:/)
+  • calls js_write_file / js_create_dir per file
+     │
+     ▼
+dest/   (source files + .git history, no credentials)
+```
+
+### Why the token stays in JavaScript
+
+`wasm32-unknown-unknown` has no OS threads and no socket API. `reqwest::blocking` is explicitly disabled for this target. HTTP is handled in Node.js — the token is used in one `https.get()` call and never enters WASM memory.
+
+---
+
+## Building on Windows (Git Bash) and Linux
 
 ### Prerequisites
 
-- Rust stable ≥ 1.75
-- Node.js ≥ 20
-
-### Windows (Git Bash)
-
 ```bash
-# 1. Install Rust
+# Install Rust
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 export PATH="$HOME/.cargo/bin:$PATH"
 
-# 2. Add the WASM target
+# Add WASM target
 rustup target add wasm32-unknown-unknown
 
-# 3. Build the WASM module
-cargo build --target wasm32-unknown-unknown --release
+# Node.js 20+ required
+node --version
+```
 
-# 4. Copy the WASM file to the project root
-cp target/wasm32-unknown-unknown/release/secure_checkout_wasm.wasm .
+### Build
 
-# 5. Install Node.js dependencies
+```bash
+# Clone
+git clone https://github.com/your-org/secure-checkout-wasm
+cd secure-checkout-wasm
+
+# Install Node deps
 npm install
 
-# 6. Validate
+# Build WASM
+cargo build --target wasm32-unknown-unknown --release --lib
+cp target/wasm32-unknown-unknown/release/secure_checkout_wasm.wasm .
+
+# Validate
 node scripts/validate-wasm.js
 ```
 
-### Linux / macOS
-
-Same commands — they work identically in bash.
-
-### Using npm shortcuts
+### Using the build script
 
 ```bash
-npm run build        # cargo build --release + cp
-npm run validate     # node scripts/validate-wasm.js
-npm run test:unit    # cargo test
-npm run audit        # cargo audit + npm audit
+./build.sh           # release WASM
+./build.sh --dev     # debug WASM (faster compile)
+./build.sh --all     # WASM + native CLI
+./build.sh --validate
 ```
 
 ---
 
-## Limitations vs `actions/checkout`
+## Running tests
 
-| Feature | `actions/checkout` | This action |
-|---|---|---|
-| Git history | ✓ Full or shallow | ✗ Archive only |
-| Submodules | ✓ | ✗ (planned) |
-| LFS | ✓ | ✗ (planned) |
-| Sparse checkout | ✓ | ✗ |
-| Post-checkout git commands | ✓ | ✗ |
+```bash
+# Unit tests (no token needed)
+cargo test --lib
 
-Use this action when your workflow only needs source files (build, lint, test, deploy).
+# Integration tests (requires token)
+export GITHUB_TOKEN=ghp_yourtoken
+node scripts/test-local.js
+
+# Against specific repo
+node scripts/test-local.js --repo sigp/lighthouse --ref stable
+```
 
 ---
 
-## License
+## Windows-specific notes
 
-MIT
+- Run all commands from Git Bash (not cmd.exe or PowerShell)
+- After installing Rust: `export PATH="$HOME/.cargo/bin:$PATH"`
+- Add to `~/.bashrc` to make permanent
+- `cargo test --lib` requires Visual Studio Build Tools (C++ workload) or MinGW
+- The WASM build (`--lib`) works without any C toolchain

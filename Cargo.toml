@@ -3,12 +3,11 @@ name        = "secure-checkout-wasm"
 version     = "1.0.0"
 edition     = "2021"
 description = "WASM ZIP-extraction core for the secure-checkout GitHub Action"
-license     = "MIT"
 
 # ── Library crate (produces the .wasm file) ───────────────────────────────
 [lib]
 name       = "secure_checkout_wasm"
-path       = "src/lib.rs" 
+path       = "src/lib.rs"
 crate-type = ["cdylib"]
 # cdylib → .wasm when targeting wasm32-unknown-unknown
 
@@ -28,7 +27,6 @@ wee_alloc = "0.4"
 # Pure-Rust DEFLATE/zlib decompression — no_std compatible
 miniz_oxide = { version = "0.7", default-features = false, features = ["with-alloc"] }
 
-
 # ── NOTE ON reqwest ────────────────────────────────────────────────────────
 # reqwest::blocking explicitly #[cfg(not(target_arch = "wasm32"))] guards
 # its blocking module.  Including it would cause:
@@ -41,10 +39,12 @@ miniz_oxide = { version = "0.7", default-features = false, features = ["with-all
 # WASM module.
 
 
-# ── Native CLI binary (for local testing; not compiled to WASM) ───────────
+# ── Native CLI binary (for local testing; excluded from WASM builds) ────────
+# Build with: cargo build --release --bin secure-checkout
+# (NOT compiled when targeting wasm32-unknown-unknown; use --lib for WASM builds)
 [[bin]]
-name = "secure-checkout"
-path = "src/main.rs"
+name              = "secure-checkout"
+path              = "src/main.rs"
 required-features = ["native-cli"]
 
 # ── Native-only dependencies (conditionally compiled) ────────────────────
@@ -61,5 +61,6 @@ zip = { version = "2.1", features = ["deflate"] }
 
 # ── Features ─────────────────────────────────────────────────────────────
 [features]
-default = []
+default    = []
+# Enable the native CLI binary (excluded by default so WASM builds stay clean)
 native-cli = []
