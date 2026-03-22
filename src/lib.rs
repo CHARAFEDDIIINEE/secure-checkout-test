@@ -190,21 +190,24 @@ fn safe_join<'a>(dest: &str, relative: &'a str) -> Result<String, String> {
 //   [Central directory headers]
 //   [End of Central Directory record (EOCD)]
 
-#[allow(dead_code)]\nfn read_u16_le(d: &[u8], off: usize) -> Result<u16, String> {
+#[allow(dead_code)]
+fn read_u16_le(d: &[u8], off: usize) -> Result<u16, String> {
     if off + 2 > d.len() {
         return Err(format!("read_u16 out of bounds at {}", off));
     }
     Ok(u16::from_le_bytes([d[off], d[off+1]]))
 }
 
-#[allow(dead_code)]\nfn read_u32_le(d: &[u8], off: usize) -> Result<u32, String> {
+#[allow(dead_code)]
+fn read_u32_le(d: &[u8], off: usize) -> Result<u32, String> {
     if off + 4 > d.len() {
         return Err(format!("read_u32 out of bounds at {}", off));
     }
     Ok(u32::from_le_bytes([d[off], d[off+1], d[off+2], d[off+3]]))
 }
 
-#[allow(dead_code)]\nfn decompress_deflate(compressed: &[u8], _expected_size: usize) -> Result<Vec<u8>, String> {
+#[allow(dead_code)]
+fn decompress_deflate(compressed: &[u8], _expected_size: usize) -> Result<Vec<u8>, String> {
     miniz_oxide::inflate::decompress_to_vec(compressed)
         .map_err(|e| format!("deflate error: {:?}", e))
 }
