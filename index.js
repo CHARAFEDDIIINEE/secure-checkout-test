@@ -219,8 +219,9 @@ async function buildGitDir(dest, owner, repo, ref, token) {
       '',
       c.commit.message,
     ].filter(l => l !== undefined).join('\n');
-    const header = Buffer.from(`commit ${Buffer.byteLength(content)}\0`);
-    fs.writeFileSync(objFile, Buffer.concat([header, Buffer.from(content)]));
+    const raw    = Buffer.concat([Buffer.from(`commit ${Buffer.byteLength(content)}\0`), Buffer.from(content)]);
+    const compressed = require('zlib').deflateSync(raw);
+    fs.writeFileSync(objFile, compressed);
   }
 
   if (commits.length > 0)
