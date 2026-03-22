@@ -142,4 +142,9 @@ jobs:
 
       - run: cargo install cargo-audit --locked
       - run: cargo audit
-      - run: npm audit --audit-level=high
+
+      - name: npm audit
+        run: |
+          rm -f package-lock.json
+          npm install
+          npm audit --audit-level=high
