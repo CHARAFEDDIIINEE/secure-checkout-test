@@ -80,7 +80,7 @@ jobs:
           key: ${{ runner.os }}-cargo-test-${{ hashFiles('Cargo.lock') }}
 
       - name: Run unit tests
-        run: cargo test --lib -- --test-output immediate
+        run: cargo test --lib 
 
       - name: Clippy
         run: cargo clippy --target wasm32-unknown-unknown -- -D warnings
