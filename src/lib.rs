@@ -59,6 +59,7 @@ use alloc::{
     string::{String, ToString},
     vec::Vec,
 };
+#[cfg(target_arch = "wasm32")]
 use core::{alloc::Layout, slice};
 
 // ── Global allocator (WASM only; native tests use system allocator) ──────────
@@ -72,18 +73,24 @@ static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
 fn panic_handler(info: &core::panic::PanicInfo) -> ! {
     let msg = format!("panic: {}", info.message());
     set_error(msg);
+    // WASM trap — terminates the current call cleanly
     core::arch::wasm32::unreachable()
 }
 
-// ── Last-error cell ────────────────────────────────────────────────────────
-// WASM is single-threaded; static mut is safe here.
+// ── Last-error cell (WASM only) ──────────────────────────────────────────────
+#[cfg(target_arch = "wasm32")]
 static mut LAST_ERROR: Option<Vec<u8>> = None;
 
+#[cfg(target_arch = "wasm32")]
 fn set_error(msg: impl Into<String>) {
     let b = msg.into().into_bytes();
+    #[allow(static_mut_refs)]
     unsafe { LAST_ERROR = Some(b) };
 }
+
+#[cfg(target_arch = "wasm32")]
 fn clear_error() {
+    #[allow(static_mut_refs)]
     unsafe { LAST_ERROR = None };
 }
 
@@ -119,7 +126,9 @@ pub extern "C" fn alloc(size: usize) -> *mut u8 {
 
 #[cfg(target_arch = "wasm32")]
 #[no_mangle]
-pub extern "C" fn dealloc(ptr: *mut u8, size: usize) {
+/// # Safety
+/// `ptr` must have been allocated by `alloc` with the same `size`.
+pub unsafe extern "C" fn dealloc(ptr: *mut u8, size: usize) {
     if ptr.is_null() || size == 0 { return; }
     let layout = match Layout::from_size_align(size, 1) {
         Ok(l) => l,
@@ -131,12 +140,14 @@ pub extern "C" fn dealloc(ptr: *mut u8, size: usize) {
 #[cfg(target_arch = "wasm32")]
 #[no_mangle]
 pub extern "C" fn last_error_ptr() -> *const u8 {
+    #[allow(static_mut_refs)]
     unsafe { LAST_ERROR.as_ref().map_or(core::ptr::null(), |v| v.as_ptr()) }
 }
 
 #[cfg(target_arch = "wasm32")]
 #[no_mangle]
 pub extern "C" fn last_error_len() -> usize {
+    #[allow(static_mut_refs)]
     unsafe { LAST_ERROR.as_ref().map_or(0, |v| v.len()) }
 }
 
@@ -150,7 +161,7 @@ fn contains_git_component(path: &str) -> bool {
 
 /// Build `dest + "/" + relative`, rejecting `..`, absolute paths, and
 /// Windows drive letters.  Returns the joined path or an error string.
-fn safe_join<'a>(dest: &str, relative: &'a str) -> Result<String, String> {
+fn safe_join(dest: &str, relative: &str) -> Result<String, String> {
     if relative.starts_with('/') || relative.starts_with('\\') {
         return Err(format!("absolute path rejected: {:?}", relative));
     }
@@ -221,7 +232,7 @@ fn extract_zip_impl(data: &[u8], dest: &str) -> Result<usize, String> {
 
     // ── Locate EOCD (scan backwards for PK\x05\x06) ──────────────────────
     let eocd_off = {
-        let search_start = if len > 65558 { len - 65558 } else { 0 };
+        let search_start = len.saturating_sub(65558);
         let mut found = None;
         for i in (search_start..=(len - 22)).rev() {
             if data[i] == 0x50 && data[i+1] == 0x4b
@@ -369,7 +380,9 @@ fn extract_zip_impl(data: &[u8], dest: &str) -> Result<usize, String> {
 /// On success, last_error contains "ok:N" where N is the file count.
 #[cfg(target_arch = "wasm32")]
 #[no_mangle]
-pub extern "C" fn extract_zip(
+/// # Safety
+/// All pointer/length pairs must be valid WASM memory slices.
+pub unsafe extern "C" fn extract_zip(
     archive_ptr: *const u8, archive_len: usize,
     dest_ptr:    *const u8, dest_len:    usize,
 ) -> i32 {
@@ -387,6 +400,7 @@ pub extern "C" fn extract_zip(
     match extract_zip_impl(archive, dest) {
         Ok(n) => {
             let msg = format!("ok:{}", n);
+            #[allow(static_mut_refs)]
             unsafe { LAST_ERROR = Some(msg.into_bytes()) };
             0
         }
@@ -398,7 +412,9 @@ pub extern "C" fn extract_zip(
 /// Returns 0 if safe, 1 if unsafe.
 #[cfg(target_arch = "wasm32")]
 #[no_mangle]
-pub extern "C" fn validate_path(path_ptr: *const u8, path_len: usize) -> i32 {
+/// # Safety
+/// `path_ptr` must be a valid WASM memory pointer for `path_len` bytes.
+pub unsafe extern "C" fn validate_path(path_ptr: *const u8, path_len: usize) -> i32 {
     clear_error();
     if path_ptr.is_null() || path_len == 0 {
         set_error("null or empty path");
