@@ -1,0 +1,20 @@
+# Rust
+/target/
+
+# WASM output (committed for distribution; comment out to exclude)
+# secure_checkout_wasm.wasm
+
+# Node.js
+node_modules/
+npm-debug.log*
+
+# Test temp dirs
+/tmp/sc-test-*/
+/official/
+/secure/
+
+# Editors
+.vscode/
+.idea/
+*.swp
+.DS_Store

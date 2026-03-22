@@ -1,0 +1,16 @@
+# .cargo/config.toml
+
+[build]
+# Uncomment to make wasm32-unknown-unknown the default target:
+# target = "wasm32-unknown-unknown"
+
+[target.wasm32-unknown-unknown]
+rustflags = [
+    "-C", "panic=abort",
+]
+
+[alias]
+build-wasm  = "build --target wasm32-unknown-unknown --release"
+build-wasm-dev = "build --target wasm32-unknown-unknown"
+check-wasm  = "check --target wasm32-unknown-unknown"
+clippy-wasm = "clippy --target wasm32-unknown-unknown"

@@ -1,0 +1,55 @@
+name: 'Secure Checkout'
+description: >
+  Drop-in replacement for actions/checkout with better security.
+  No token in .git/config, no ArtiPACKED risk, token never on disk.
+
+author: 'secure-checkout contributors'
+branding:
+  icon:  'lock'
+  color: 'blue'
+
+inputs:
+  repository:
+    description: 'Repository to check out (owner/name)'
+    required: false
+    default:  '${{ github.repository }}'
+
+  ref:
+    description: 'Branch, tag, or commit SHA'
+    required: false
+    default:  '${{ github.sha }}'
+
+  token:
+    description: 'GitHub token — never written to disk'
+    required: false
+    default:  '${{ github.token }}'
+
+  path:
+    description: 'Destination directory (relative to workspace)'
+    required: false
+    default:  '.'
+
+  fetch-depth:
+    description: 'Number of commits to fetch (0 = skip git history)'
+    required: false
+    default:  '1'
+
+  submodules:
+    description: 'Checkout submodules (true/false)'
+    required: false
+    default:  'false'
+
+  lfs:
+    description: 'Download Git LFS files (true/false)'
+    required: false
+    default:  'false'
+
+outputs:
+  path:
+    description: 'Absolute path where the repository was checked out'
+  ref:
+    description: 'The ref that was checked out'
+
+runs:
+  using: 'node20'
+  main:  'index.js'

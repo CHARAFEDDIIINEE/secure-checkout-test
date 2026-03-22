@@ -1,0 +1,65 @@
+[package]
+name        = "secure-checkout-wasm"
+version     = "1.0.0"
+edition     = "2021"
+description = "WASM ZIP-extraction core for the secure-checkout GitHub Action"
+license     = "MIT"
+
+# ── Library crate (produces the .wasm file) ───────────────────────────────
+[lib]
+name       = "secure_checkout_wasm"
+path       = "src/lib.rs" 
+crate-type = ["cdylib"]
+# cdylib → .wasm when targeting wasm32-unknown-unknown
+
+# ── Release profile: minimise WASM size ──────────────────────────────────
+[profile.release]
+opt-level     = "z"     # size-first optimisation
+lto           = true    # link-time optimisation removes dead code
+codegen-units = 1       # single codegen unit for maximum LTO
+panic         = "abort" # no unwinding machinery in WASM
+strip         = "symbols"
+
+# ── Dependencies ──────────────────────────────────────────────────────────
+[dependencies]
+# Tiny WASM-compatible heap allocator (~1 KiB overhead)
+wee_alloc = "0.4"
+
+# Pure-Rust DEFLATE/zlib decompression — no_std compatible
+miniz_oxide = { version = "0.7", default-features = false, features = ["with-alloc"] }
+
+
+# ── NOTE ON reqwest ────────────────────────────────────────────────────────
+# reqwest::blocking explicitly #[cfg(not(target_arch = "wasm32"))] guards
+# its blocking module.  Including it would cause:
+#
+#   error: `blocking` not supported when targeting wasm32
+#
+# HTTP is therefore handled in the JavaScript host (index.js) using the
+# native Node.js `https` module, which has no WASM/thread restrictions.
+# The token is used in exactly one fetch call and is never passed into the
+# WASM module.
+
+
+# ── Native CLI binary (for local testing; not compiled to WASM) ───────────
+[[bin]]
+name = "secure-checkout"
+path = "src/main.rs"
+required-features = ["native-cli"]
+
+# ── Native-only dependencies (conditionally compiled) ────────────────────
+# These are only available on the host target, not wasm32-unknown-unknown.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# Sync HTTP client for the native CLI binary
+ureq = { version = "2.10", default-features = false, features = ["tls"] }
+# ZIP reading for the native CLI binary
+zip  = { version = "2.1", default-features = false, features = ["deflate"] }
+
+# ── Dev-only dependencies (native tests only) ────────────────────────────
+[dev-dependencies]
+zip = { version = "2.1", features = ["deflate"] }
+
+# ── Features ─────────────────────────────────────────────────────────────
+[features]
+default = []
+native-cli = []

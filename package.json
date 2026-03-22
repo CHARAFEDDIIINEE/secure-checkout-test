@@ -1,0 +1,36 @@
+{
+  "name": "secure-checkout-wasm",
+  "version": "1.0.0",
+  "description": "Secure GitHub repository checkout via WASM ZIP extraction",
+  "license": "MIT",
+  "private": true,
+  "main": "index.js",
+  "scripts": {
+    "install-rust": "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && export PATH=\"$HOME/.cargo/bin:$PATH\"",
+    "add-wasm-target": "rustup target add wasm32-unknown-unknown",
+    "build:wasm": "cargo build --target wasm32-unknown-unknown --release && cp target/wasm32-unknown-unknown/release/secure_checkout_wasm.wasm .",
+    "build:wasm:dev": "cargo build --target wasm32-unknown-unknown && cp target/wasm32-unknown-unknown/debug/secure_checkout_wasm.wasm .",
+    "build": "npm run build:wasm",
+    "validate": "node scripts/validate-wasm.js",
+    "test": "cargo test && node scripts/test-local.js",
+    "test:unit": "cargo test",
+    "test:local": "node scripts/test-local.js",
+    "lint": "cargo clippy --target wasm32-unknown-unknown -- -D warnings",
+    "audit": "cargo audit && npm audit --audit-level=high",
+    "clean": "cargo clean && rm -f secure_checkout_wasm.wasm"
+  },
+  "dependencies": {
+    "@actions/core":   "^1.10.1",
+    "@actions/github": "^6.0.0"
+  },
+  "devDependencies": {},
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "files": [
+    "index.js",
+    "action.yml",
+    "secure_checkout_wasm.wasm",
+    "README.md"
+  ]
+}

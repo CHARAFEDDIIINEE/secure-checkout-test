@@ -1,0 +1,96 @@
+name: Test secure-checkout-wasm
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout this action's code
+        uses: actions/checkout@v4
+
+      - name: Install Node dependencies
+        run: npm install
+
+      - name: Test against Lighthouse
+        uses: ./
+        with:
+          repository: sigp/lighthouse
+          ref: stable
+          token: ${{ secrets.GITHUB_TOKEN }}
+          path: lighthouse-out
+
+      - name: Test against Geth
+        uses: ./
+        with:
+          repository: ethereum/go-ethereum
+          ref: master
+          token: ${{ secrets.GITHUB_TOKEN }}
+          path: geth-out
+
+      - name: Test against Reth
+        uses: ./
+        with:
+          repository: paradigmxyz/reth
+          ref: main
+          token: ${{ secrets.GITHUB_TOKEN }}
+          path: reth-out
+
+      - name: Verify no .git directories
+        run: |
+          echo "Checking Lighthouse..."
+          [ ! -d lighthouse-out/.git ] && echo "✓ no .git" || (echo "✗ .git found" && exit 1)
+
+          echo "Checking Geth..."
+          [ ! -d geth-out/.git ] && echo "✓ no .git" || (echo "✗ .git found" && exit 1)
+
+          echo "Checking Reth..."
+          [ ! -d reth-out/.git ] && echo "✓ no .git" || (echo "✗ .git found" && exit 1)
+
+      - name: Verify token not in any file
+        run: |
+          echo "Scanning Lighthouse..."
+          ! grep -rF "${{ secrets.GITHUB_TOKEN }}" lighthouse-out/
+          echo "✓ token not found"
+
+          echo "Scanning Geth..."
+          ! grep -rF "${{ secrets.GITHUB_TOKEN }}" geth-out/
+          echo "✓ token not found"
+
+          echo "Scanning Reth..."
+          ! grep -rF "${{ secrets.GITHUB_TOKEN }}" reth-out/
+          echo "✓ token not found"
+
+      - name: Verify git history works
+        run: |
+          echo "Lighthouse git log:"
+          git -C lighthouse-out log --oneline -3
+
+          echo "Geth git log:"
+          git -C geth-out log --oneline -3
+
+          echo "Reth git log:"
+          git -C reth-out log --oneline -3
+
+      - name: Verify no token in .git/config
+        run: |
+          for dir in lighthouse-out geth-out reth-out; do
+            if grep -F "${{ secrets.GITHUB_TOKEN }}" "$dir/.git/config" 2>/dev/null; then
+              echo "✗ SECURITY: token found in $dir/.git/config"
+              exit 1
+            fi
+            echo "✓ $dir/.git/config is clean"
+          done
+
+      - name: Show summary
+        run: |
+          echo "================================"
+          echo "All checks passed"
+          echo "Lighthouse: $(find lighthouse-out -type f | wc -l) files"
+          echo "Geth:       $(find geth-out -type f | wc -l) files"
+          echo "Reth:       $(find reth-out -type f | wc -l) files"
+          echo "================================"
